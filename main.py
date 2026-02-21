@@ -31,9 +31,7 @@ class TeacherReport(StatesGroup):
     choosing_end_date = State()
     waiting_for_fullname = State()
     waiting_for_subject = State()
-    filling_schedule = State()
-    waiting_for_topic = State()
-    waiting_for_homework = State()
+    # Jadval to'ldirish qismi olib tashlandi
     waiting_for_plan_file = State()
     waiting_for_test_sample = State()
     waiting_for_test_results = State()
@@ -63,41 +61,12 @@ def get_calendar_kb(prefix: str, month_offset=0):
     builder.adjust(7)
     return builder.as_markup()
 
-def get_next_week_dates():
-    today = datetime.now()
-    days_until_monday = (7 - today.weekday()) % 7
-    if days_until_monday == 0: days_until_monday = 7
-
-    start_of_next_week = today + timedelta(days=days_until_monday)
-    return [(start_of_next_week + timedelta(days=i)).strftime("%d.%m.%Y") for i in range(5)]
-
 def get_last_week_range():
-    """Avtomatik ravishda o'tgan haftaning Dushanba va Yakshanba kunlarini topadi"""
     today = datetime.now()
-    # Dushanba = 0, Yakshanba = 6
     days_to_last_monday = today.weekday() + 7
     last_monday = today - timedelta(days=days_to_last_monday)
     last_sunday = last_monday + timedelta(days=6)
-
     return f"{last_monday.strftime('%d.%m.%Y')} - {last_sunday.strftime('%d.%m.%Y')}"
-
-def get_schedule_kb(data):
-    builder = InlineKeyboardBuilder()
-    days = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma"]
-    dates = get_next_week_dates()
-    schedule = data.get("schedule", {})
-
-    all_done = True
-    for i, day in enumerate(days):
-        date_str = dates[i]
-        status = "✅" if date_str in schedule and "topic" in schedule[date_str] and "hw" in schedule[date_str] else "❌"
-        if status == "❌": all_done = False
-        builder.button(text=f"{status} {day} ({date_str})", callback_data=f"wd:{date_str}")
-
-    builder.adjust(1)
-    if all_done:
-        builder.row(InlineKeyboardButton(text="➡️ Davom etish", callback_data="schedule_done"))
-    return builder.as_markup()
 
 # ================= HANDLERLAR =================
 
@@ -152,42 +121,10 @@ async def process_name(message: Message, state: FSMContext):
 @router.message(TeacherReport.waiting_for_subject)
 async def process_subject(message: Message, state: FSMContext):
     await state.update_data(subject=message.text)
-    await state.set_state(TeacherReport.filling_schedule)
-    data = await state.get_data()
-    await message.answer("Keyingi hafta uchun mavzu va uy vazifasini kiritish uchun kunni tanlang:", reply_markup=get_schedule_kb(data))
-
-@router.callback_query(TeacherReport.filling_schedule, F.data.startswith("wd:"))
-async def select_day(callback: CallbackQuery, state: FSMContext):
-    date_str = callback.data.split(":")[1]
-    await state.update_data(current_editing_day=date_str)
-    await state.set_state(TeacherReport.waiting_for_topic)
-    await callback.message.answer(f"📝 {date_str} uchun MAVZUNI kiriting:")
-    await callback.answer()
-
-@router.message(TeacherReport.waiting_for_topic)
-async def process_topic(message: Message, state: FSMContext):
-    await state.update_data(temp_topic=message.text)
-    await state.set_state(TeacherReport.waiting_for_homework)
-    await message.answer("Ushbu kun uchun UY VAZIFASINI kiriting:")
-
-@router.message(TeacherReport.waiting_for_homework)
-async def process_hw(message: Message, state: FSMContext):
-    data = await state.get_data()
-    day = data['current_editing_day']
-    schedule = data.get("schedule", {})
-    schedule[day] = {"topic": data['temp_topic'], "hw": message.text}
-
-    await state.update_data(schedule=schedule)
-    await state.set_state(TeacherReport.filling_schedule)
-    await message.answer("✅ Kun ma'lumotlari saqlandi.", reply_markup=get_schedule_kb(await state.get_data()))
-
-@router.callback_query(TeacherReport.filling_schedule, F.data == "schedule_done")
-async def finish_schedule(callback: CallbackQuery, state: FSMContext):
+    # Jadval qismi o'tkazib yuborildi, to'g'ridan-to'g'ri fayl yuklashga
     await state.set_state(TeacherReport.waiting_for_plan_file)
-    await callback.message.answer("📄 Haftalik ish rejangizni yuklang (PDF yoki DOCX):\n*(Maksimal hajm: 20 MB)*", parse_mode="Markdown")
-    await callback.answer()
+    await message.answer("📄 Haftalik ish rejangizni yuklang (PDF yoki DOCX):\n*(Maksimal hajm: 20 MB)*", parse_mode="Markdown")
 
-# 6. FAYLLAR VA O'LCHAMLARNI TEKSHIRISH
 @router.message(TeacherReport.waiting_for_plan_file, F.document)
 async def process_plan(message: Message, state: FSMContext):
     if message.document.file_size > MAX_FILE_SIZE:
@@ -215,51 +152,26 @@ async def process_final(message: Message, state: FSMContext):
     data = await state.get_data()
     test_results_id = message.document.file_id
 
-    # Matnni tayyorlash
-    sched_text = ""
-    for date, info in data['schedule'].items():
-        sched_text += f"🔹 <b>{date}</b>\n   Mavzu: {info['topic']}\n   Vazifa: {info['hw']}\n"
-
     report_text = (
         "📊 <b>YANGI HAFTALIK HISOBOT</b>\n\n"
         f"📱 <b>Telefon:</b> {data['phone']}\n"
-        f"🗓 <b>Sana (Joriy):</b> {data['date_range']}\n"
+        f"🗓 <b>Sana oralig'i:</b> {data['date_range']}\n"
         f"👤 <b>O'qituvchi:</b> {data['fullname']}\n"
-        f"📚 <b>Fan:</b> {data['subject']}\n\n"
-        f"<b>Keyingi hafta rejasi:</b>\n{sched_text}"
+        f"📚 <b>Fan:</b> {data['subject']}\n"
     )
 
     try:
         await bot.send_message(ADMIN_GROUP_ID, report_text, parse_mode="HTML")
 
-        # Sigs va Sanalar
         current_sig = f"({data['fullname']}) ({data['date_range']})"
         last_week_dates = get_last_week_range()
         last_week_sig = f"({data['fullname']}) ({last_week_dates})"
 
-        # 1. Haftalik ish reja (Joriy hafta sanasi bilan)
-        await bot.send_document(
-            ADMIN_GROUP_ID,
-            data['plan_file_id'],
-            caption=f"📂 Haftalik ish reja {current_sig}"
-        )
-
-        # 2. O'tgan hafta test namunasi (O'tgan hafta sanasi bilan)
-        await bot.send_document(
-            ADMIN_GROUP_ID,
-            data['test_sample_id'],
-            caption=f"📄 O'tgan hafta test namunasi {last_week_sig}"
-        )
-
-        # 3. O'tgan hafta test natijalari (O'tgan hafta sanasi bilan)
-        await bot.send_document(
-            ADMIN_GROUP_ID,
-            test_results_id,
-            caption=f"📈 O'tgan hafta test natijalari {last_week_sig}"
-        )
+        await bot.send_document(ADMIN_GROUP_ID, data['plan_file_id'], caption=f"📂 Haftalik ish reja {current_sig}")
+        await bot.send_document(ADMIN_GROUP_ID, data['test_sample_id'], caption=f"📄 O'tgan hafta test namunasi {last_week_sig}")
+        await bot.send_document(ADMIN_GROUP_ID, test_results_id, caption=f"📈 O'tgan hafta test natijalari {last_week_sig}")
 
         await message.answer("✅ Ma'lumotlaringiz muvaffaqiyatli yuborildi. Rahmat!")
-        await message.answer(report_text, parse_mode="HTML")
     except Exception as e:
         logging.error(f"Xatolik: {e}")
         await message.answer("❌ Xatolik yuz berdi. Bot admin guruhga yozolmayapti.")
