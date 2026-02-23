@@ -1,10 +1,11 @@
 import asyncio
 import logging
+import gc  # Forcing memory cleanup
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import (Message, CallbackQuery, ReplyKeyboardMarkup,
                            KeyboardButton, InlineKeyboardButton, ReplyKeyboardRemove)
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -14,7 +15,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 BOT_TOKEN = "8514239580:AAGD9c3Sls4WGwLmjf3xYhN8pXFTpifNuGU"
 ADMIN_GROUP_ID = -1003799360830
 TEACHER_PASSWORD = "12345"
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB limit
+
+# CHANGED: Max file size is now 10 MB
+MAX_FILE_SIZE = 10 * 1024 * 1024
 
 logging.basicConfig(level=logging.INFO)
 
@@ -31,13 +34,11 @@ class TeacherReport(StatesGroup):
     choosing_end_date = State()
     waiting_for_fullname = State()
     waiting_for_subject = State()
-    # Jadval to'ldirish qismi olib tashlandi
     waiting_for_plan_file = State()
     waiting_for_test_sample = State()
     waiting_for_test_results = State()
 
 # ================= YORDAMCHI FUNKSIYALAR =================
-
 def get_contact_kb():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Raqamni ulashish", request_contact=True)]],
@@ -70,10 +71,31 @@ def get_last_week_range():
 
 # ================= HANDLERLAR =================
 
+@router.message(Command("cancel"))
+@router.message(F.text.lower() == "bekor qilish")
+async def cmd_cancel(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state is None:
+        return
+
+    await state.clear()
+    gc.collect()
+
+    await message.answer(
+        "❌ Barcha amallar bekor qilindi va xotira tozalandi. Boshidan boshlash uchun /start bosing.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
     await state.set_state(TeacherReport.waiting_for_contact)
-    await message.answer("Assalomu alaykum! Boshlash uchun pastdagi tugma orqali telefon raqamingizni yuboring.", reply_markup=get_contact_kb())
+    await message.answer(
+        "Assalomu alaykum! Boshlash uchun pastdagi tugma orqali telefon raqamingizni yuboring.\n\n"
+        "<i>(Jarayonni to'xtatish uchun /cancel ni bosing)</i>",
+        reply_markup=get_contact_kb(),
+        parse_mode="HTML"
+    )
 
 @router.message(TeacherReport.waiting_for_contact)
 async def process_contact(message: Message, state: FSMContext):
@@ -121,32 +143,37 @@ async def process_name(message: Message, state: FSMContext):
 @router.message(TeacherReport.waiting_for_subject)
 async def process_subject(message: Message, state: FSMContext):
     await state.update_data(subject=message.text)
-    # Jadval qismi o'tkazib yuborildi, to'g'ridan-to'g'ri fayl yuklashga
     await state.set_state(TeacherReport.waiting_for_plan_file)
-    await message.answer("📄 Haftalik ish rejangizni yuklang (PDF yoki DOCX):\n*(Maksimal hajm: 20 MB)*", parse_mode="Markdown")
+    # CHANGED: Updated text to 10 MB
+    await message.answer("📄 Haftalik ish rejangizni yuklang (PDF yoki DOCX):\n*(Maksimal hajm: 10 MB)*", parse_mode="Markdown")
 
 @router.message(TeacherReport.waiting_for_plan_file, F.document)
 async def process_plan(message: Message, state: FSMContext):
     if message.document.file_size > MAX_FILE_SIZE:
-        await message.answer("⚠️ Fayl hajmi 20 MB dan oshmasligi kerak. Iltimos, kichikroq fayl yuklang:")
+        # CHANGED: Updated text to 10 MB
+        await message.answer("⚠️ Fayl hajmi 10 MB dan oshmasligi kerak. Iltimos, kichikroq fayl yuklang:")
         return
     await state.update_data(plan_file_id=message.document.file_id)
     await state.set_state(TeacherReport.waiting_for_test_sample)
-    await message.answer("📄 O'tgan hafta test namunasi faylini yuklang:\n*(Maksimal hajm: 20 MB)*", parse_mode="Markdown")
+    # CHANGED: Updated text to 10 MB
+    await message.answer("📄 O'tgan hafta test namunasi faylini yuklang:\n*(Maksimal hajm: 10 MB)*", parse_mode="Markdown")
 
 @router.message(TeacherReport.waiting_for_test_sample, F.document)
 async def process_sample(message: Message, state: FSMContext):
     if message.document.file_size > MAX_FILE_SIZE:
-        await message.answer("⚠️ Fayl hajmi 20 MB dan oshmasligi kerak. Iltimos, kichikroq fayl yuklang:")
+        # CHANGED: Updated text to 10 MB
+        await message.answer("⚠️ Fayl hajmi 10 MB dan oshmasligi kerak. Iltimos, kichikroq fayl yuklang:")
         return
     await state.update_data(test_sample_id=message.document.file_id)
     await state.set_state(TeacherReport.waiting_for_test_results)
-    await message.answer("📄 O'tgan hafta test natijalari faylini yuklang:\n*(Maksimal hajm: 20 MB)*", parse_mode="Markdown")
+    # CHANGED: Updated text to 10 MB
+    await message.answer("📄 O'tgan hafta test natijalari faylini yuklang:\n*(Maksimal hajm: 10 MB)*", parse_mode="Markdown")
 
 @router.message(TeacherReport.waiting_for_test_results, F.document)
 async def process_final(message: Message, state: FSMContext):
     if message.document.file_size > MAX_FILE_SIZE:
-        await message.answer("⚠️ Fayl hajmi 20 MB dan oshmasligi kerak. Iltimos, kichikroq fayl yuklang:")
+        # CHANGED: Updated text to 10 MB
+        await message.answer("⚠️ Fayl hajmi 10 MB dan oshmasligi kerak. Iltimos, kichikroq fayl yuklang:")
         return
 
     data = await state.get_data()
@@ -154,18 +181,19 @@ async def process_final(message: Message, state: FSMContext):
 
     report_text = (
         "📊 <b>YANGI HAFTALIK HISOBOT</b>\n\n"
-        f"📱 <b>Telefon:</b> {data['phone']}\n"
-        f"🗓 <b>Sana oralig'i:</b> {data['date_range']}\n"
-        f"👤 <b>O'qituvchi:</b> {data['fullname']}\n"
-        f"📚 <b>Fan:</b> {data['subject']}\n"
+        f"📱 <b>Telefon:</b> {data.get('phone', 'Noma\\'lum')}\n"
+        f"🗓 <b>Sana oralig'i:</b> {data.get('date_range', 'Noma\\'lum')}\n"
+        f"👤 <b>O'qituvchi:</b> {data.get('fullname', 'Noma\\'lum')}\n"
+        f"📚 <b>Fan:</b> {data.get('subject', 'Noma\\'lum')}\n"
     )
 
     try:
         await bot.send_message(ADMIN_GROUP_ID, report_text, parse_mode="HTML")
 
-        current_sig = f"({data['fullname']}) ({data['date_range']})"
+        fullname = data.get('fullname', 'Noma\'lum')
+        current_sig = f"({fullname}) ({data.get('date_range', '')})"
         last_week_dates = get_last_week_range()
-        last_week_sig = f"({data['fullname']}) ({last_week_dates})"
+        last_week_sig = f"({fullname}) ({last_week_dates})"
 
         await bot.send_document(ADMIN_GROUP_ID, data['plan_file_id'], caption=f"📂 Haftalik ish reja {current_sig}")
         await bot.send_document(ADMIN_GROUP_ID, data['test_sample_id'], caption=f"📄 O'tgan hafta test namunasi {last_week_sig}")
@@ -176,10 +204,13 @@ async def process_final(message: Message, state: FSMContext):
         logging.error(f"Xatolik: {e}")
         await message.answer("❌ Xatolik yuz berdi. Bot admin guruhga yozolmayapti.")
 
-    await state.clear()
+    finally:
+        await state.clear()
+        gc.collect()
 
 async def main():
     print("Bot ishga tushdi...")
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
