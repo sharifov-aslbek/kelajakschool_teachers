@@ -299,7 +299,7 @@ async def process_lesson_topic(message: Message, state: FSMContext):
     c_num = data['current_lesson_num']
 
     await state.set_state(TeacherReport.waiting_for_lesson_homework)
-    await message.answer(f"{c_num}-dars uchun uyga vazifa nima berildi?")
+    await message.answer(f"{c_num}-dars uchun uyga vazifa nima beriladi?")
 
 @router.message(TeacherReport.waiting_for_lesson_homework)
 async def process_lesson_homework(message: Message, state: FSMContext):
