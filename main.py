@@ -4,9 +4,11 @@ import gc
 import calendar
 import html
 from datetime import datetime, timedelta, timezone
-from aiogram import Bot, Dispatcher, F, Router
+from typing import Callable, Dict, Any, Awaitable
+
+from aiogram import Bot, Dispatcher, F, Router, BaseMiddleware
 from aiogram.types import (Message, CallbackQuery, ReplyKeyboardMarkup,
-                           KeyboardButton, ReplyKeyboardRemove)
+                           KeyboardButton, ReplyKeyboardRemove, TelegramObject)
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -24,6 +26,38 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
+
+# ================= MIDDLEWARE (KUNLIK CHEKLOV) =================
+class WeekendOnlyMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        # O'zbekiston vaqti bilan tekshirish (UTC+5)
+        tz = timezone(timedelta(hours=5))
+        current_weekday = datetime.now(tz).weekday()
+
+        # Python'da haftaning kunlari: 0=Dushanba ... 5=Shanba, 6=Yakshanba
+        if current_weekday not in [5, 6]:
+            if isinstance(event, Message):
+                # Faqatgina /start berilganda aytilgan xabarni ko'rsatish
+                if event.text == '/start':
+                    await event.answer("Bot faqatgina Shanba yakshanba kunlari davomida ishlaydi")
+            elif isinstance(event, CallbackQuery):
+                # Agar boshqa kunlari eski tugmalarni bosib yuborsa, alert ko'rsatiladi
+                await event.answer("Bot faqatgina Shanba yakshanba kunlari davomida ishlaydi", show_alert=True)
+
+            # Boshqa kunlari jarayon shu yerda to'xtatiladi
+            return
+
+        return await handler(event, data)
+
+# Middleware'ni barcha xabar va callbacklarga ulash
+router.message.middleware(WeekendOnlyMiddleware())
+router.callback_query.middleware(WeekendOnlyMiddleware())
+
 dp.include_router(router)
 
 # ================= HOLATLAR (FSM) =================
@@ -197,16 +231,12 @@ async def process_name(message: Message, state: FSMContext):
     await state.set_state(TeacherReport.waiting_for_subject)
     await message.answer("Qaysi fan bo'yicha dars berasiz?")
 
-# --- MODIFIED: Transitioning to the new Plan Logic ---
 @router.message(TeacherReport.waiting_for_subject)
 async def process_subject(message: Message, state: FSMContext):
     await state.update_data(subject=message.text)
-
-    # Switch to week selection instead of file upload
     await state.set_state(TeacherReport.choosing_report_week)
     kb, weeks_dict = get_month_weeks_kb()
     await state.update_data(weeks_dict=weeks_dict)
-
     await message.answer("Oyning qaysi haftasi uchun hisobot kiritmoqchisiz?", reply_markup=kb)
 
 @router.callback_query(TeacherReport.choosing_report_week, F.data.startswith("repweek:"))
@@ -238,7 +268,6 @@ async def process_day_selection(callback: CallbackQuery, state: FSMContext):
     day = callback.data.split(":")[1]
 
     if day == "done":
-        # Cycle finished -> Proceed to normal file uploads
         await state.set_state(TeacherReport.waiting_for_test_sample)
         await callback.message.edit_text(
             "📄 O'tgan hafta test namunasi faylini yuklang:\n*(Maksimal hajm: 10 MB)*",
@@ -271,7 +300,6 @@ async def process_skip_day(callback: CallbackQuery, state: FSMContext):
 
 async def handle_day_hours(hours: int, event, state: FSMContext):
     if hours <= 0:
-        # Move back to day selection directly
         await show_day_selection(event, state)
         return
 
@@ -279,7 +307,6 @@ async def handle_day_hours(hours: int, event, state: FSMContext):
     data = await state.get_data()
     day = data['current_day']
 
-    # Initialize this day's list in state dictionary
     lessons_data = data.get('lessons_data', {})
     lessons_data[day] = []
     await state.update_data(lessons_data=lessons_data)
@@ -310,21 +337,17 @@ async def process_lesson_homework(message: Message, state: FSMContext):
     topic = data['temp_topic']
     homework = message.text
 
-    # Append to state
     lessons_data = data.get('lessons_data', {})
     lessons_data[day].append({"topic": topic, "homework": homework})
     await state.update_data(lessons_data=lessons_data)
 
     if c_num < t_less:
-        # Next lesson for the same day
         c_num += 1
         await state.update_data(current_lesson_num=c_num)
         await state.set_state(TeacherReport.waiting_for_lesson_topic)
         await message.answer(f"<b>{day}</b>. {c_num}-dars mavzusi nima bo‘ldi?", parse_mode="HTML")
     else:
-        # Cycle complete for this day, prompt the day menu again
         await show_day_selection(message, state)
-# --- END MODIFIED PLAN LOGIC ---
 
 @router.message(TeacherReport.waiting_for_test_sample, F.document)
 async def process_sample(message: Message, state: FSMContext):
@@ -344,13 +367,10 @@ async def process_final(message: Message, state: FSMContext):
     data = await state.get_data()
     test_results_id = message.document.file_id
 
-    # Base details
     phone = data.get('phone', "Noma'lum")
     date_range = data.get('date_range', "Noma'lum")
     fullname = html.escape(data.get('fullname', "Noma'lum"))
     subject = html.escape(data.get('subject', "Noma'lum"))
-
-    # New Plan Details
     report_week_range = data.get('report_week_range', "Noma'lum")
     weekly_hours = data.get('weekly_hours', 0)
     lessons_data = data.get('lessons_data', {})
@@ -385,7 +405,6 @@ async def process_final(message: Message, state: FSMContext):
         last_week_dates = get_last_week_range()
         last_week_sig = f"({fullname}) ({last_week_dates})"
 
-        # Note: 'plan_file_id' document is no longer sent since we replaced it
         await bot.send_document(ADMIN_GROUP_ID, data['test_sample_id'], caption=f"📄 O'tgan hafta test namunasi {last_week_sig}")
         await bot.send_document(ADMIN_GROUP_ID, test_results_id, caption=f"📈 O'tgan hafta test natijalari {last_week_sig}")
 
@@ -393,7 +412,6 @@ async def process_final(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Xatolik: {e}")
         await message.answer("❌ Xatolik yuz berdi. Bot admin guruhga yozolmayapti.")
-
     finally:
         await state.clear()
         gc.collect()
