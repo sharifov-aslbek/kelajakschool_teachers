@@ -40,14 +40,14 @@ class WeekendOnlyMiddleware(BaseMiddleware):
         current_weekday = datetime.now(tz).weekday()
 
         # Python'da haftaning kunlari: 0=Dushanba ... 5=Shanba, 6=Yakshanba
-        if current_weekday not in [5, 6]:
+        if current_weekday not in [4 , 5, 6]:
             if isinstance(event, Message):
                 # Faqatgina /start berilganda aytilgan xabarni ko'rsatish
                 if event.text == '/start':
-                    await event.answer("Bot faqatgina Shanba yakshanba kunlari davomida ishlaydi")
+                    await event.answer("Bot faqatgina Shanba va Yakshanba kunlari davomida ishlaydi")
             elif isinstance(event, CallbackQuery):
                 # Agar boshqa kunlari eski tugmalarni bosib yuborsa, alert ko'rsatiladi
-                await event.answer("Bot faqatgina Shanba yakshanba kunlari davomida ishlaydi", show_alert=True)
+                await event.answer("Bot faqatgina Shanba va Yakshanba kunlari davomida ishlaydi", show_alert=True)
 
             # Boshqa kunlari jarayon shu yerda to'xtatiladi
             return
@@ -67,6 +67,7 @@ class TeacherReport(StatesGroup):
     choosing_start_date = State()
     choosing_end_date = State()
     waiting_for_fullname = State()
+    waiting_for_class_name = State()  # YANGA QO'SHILDI
     waiting_for_subject = State()
 
     # --- YANI HOLATLAR (Interactive Plan o'rniga) ---
@@ -155,12 +156,17 @@ async def show_day_selection(event, state: FSMContext):
     builder.button(text="Davom etish ➡️", callback_data="selday:done")
     builder.adjust(2, 2, 2, 1)
 
-    text = "Kunni tanlang (barcha kunlarni kiritib bo'lgach 'Davom etish ➡️' tugmasini bosing):"
+    data = await state.get_data()
+    weekly_hours = data.get('weekly_hours', 0)
+    entered_count = sum(len(lessons) for lessons in data.get('lessons_data', {}).values())
+    remaining = weekly_hours - entered_count
+
+    text = f"Kunni tanlang (Hali <b>{remaining} ta</b> dars kiritishingiz kerak):\nBarcha darslarni kiritib bo'lgach 'Davom etish ➡️' tugmasini bosing."
 
     if isinstance(event, Message):
-        await event.answer(text, reply_markup=builder.as_markup())
+        await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     else:
-        await event.message.answer(text, reply_markup=builder.as_markup())
+        await event.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         await event.answer()
 
 # ================= HANDLERLAR =================
@@ -228,8 +234,25 @@ async def handle_calendar(callback: CallbackQuery, state: FSMContext):
 @router.message(TeacherReport.waiting_for_fullname)
 async def process_name(message: Message, state: FSMContext):
     await state.update_data(fullname=message.text)
+    await state.set_state(TeacherReport.waiting_for_class_name)
+
+    builder = InlineKeyboardBuilder()
+    classes = [
+        "1- sinf", "2- sinf", "3- sinf", "4- sinf",
+        "Class of young talents", "Class of liders", "Class of winners"
+    ]
+    for c_name in classes:
+        builder.button(text=c_name, callback_data=f"class:{c_name}")
+
+    builder.adjust(2)
+    await message.answer("Qaysi sinfga dars o‘tasiz?", reply_markup=builder.as_markup())
+
+@router.callback_query(TeacherReport.waiting_for_class_name, F.data.startswith("class:"))
+async def process_class_name(callback: CallbackQuery, state: FSMContext):
+    class_name = callback.data.split(":", 1)[1]
+    await state.update_data(class_name=class_name)
     await state.set_state(TeacherReport.waiting_for_subject)
-    await message.answer("Qaysi fan bo'yicha dars berasiz?")
+    await callback.message.edit_text(f"✅ Sinf: {class_name}\n\nQaysi fan bo'yicha dars berasiz?")
 
 @router.message(TeacherReport.waiting_for_subject)
 async def process_subject(message: Message, state: FSMContext):
@@ -266,8 +289,21 @@ async def process_weekly_hours(message: Message, state: FSMContext):
 @router.callback_query(TeacherReport.choosing_day_of_week, F.data.startswith("selday:"))
 async def process_day_selection(callback: CallbackQuery, state: FSMContext):
     day = callback.data.split(":")[1]
+    data = await state.get_data()
 
     if day == "done":
+        weekly_hours = data.get('weekly_hours', 0)
+        entered_count = sum(len(lessons) for lessons in data.get('lessons_data', {}).values())
+        remaining = weekly_hours - entered_count
+
+        # Barcha darslar to'ldirilganligini tekshirish
+        if remaining > 0:
+            await callback.answer(
+                f"⚠️ Siz hali {remaining} ta dars ma’lumotini kiritmadingiz. Iltimos, davom etishdan oldin barcha darslarni kiriting.",
+                show_alert=True
+            )
+            return
+
         await state.set_state(TeacherReport.waiting_for_test_sample)
         await callback.message.edit_text(
             "📄 O'tgan hafta test namunasi faylini yuklang:\n*(Maksimal hajm: 10 MB)*",
@@ -299,16 +335,30 @@ async def process_skip_day(callback: CallbackQuery, state: FSMContext):
     await handle_day_hours(0, callback, state)
 
 async def handle_day_hours(hours: int, event, state: FSMContext):
+    data = await state.get_data()
+    weekly_hours = data.get('weekly_hours', 0)
+    entered_count = sum(len(lessons) for lessons in data.get('lessons_data', {}).values())
+    remaining = weekly_hours - entered_count
+
+    # Kiritilayotgan soat qolgan soatlardan ko'p bo'lmasligi kerak
+    if hours > remaining and hours > 0:
+        error_msg = f"⚠️ Sizda faqat {remaining} soat kiritish imkoni qolgan. Iltimos to'g'ri dars soatini kiriting."
+        if isinstance(event, Message):
+            await event.answer(error_msg)
+        else:
+            await event.answer(error_msg, show_alert=True)
+        return
+
     if hours <= 0:
         await show_day_selection(event, state)
         return
 
     await state.update_data(target_lessons=hours, current_lesson_num=1)
-    data = await state.get_data()
     day = data['current_day']
 
     lessons_data = data.get('lessons_data', {})
-    lessons_data[day] = []
+    if day not in lessons_data:
+        lessons_data[day] = []
     await state.update_data(lessons_data=lessons_data)
 
     await state.set_state(TeacherReport.waiting_for_lesson_topic)
@@ -370,6 +420,7 @@ async def process_final(message: Message, state: FSMContext):
     phone = data.get('phone', "Noma'lum")
     date_range = data.get('date_range', "Noma'lum")
     fullname = html.escape(data.get('fullname', "Noma'lum"))
+    class_name = html.escape(data.get('class_name', "Noma'lum"))
     subject = html.escape(data.get('subject', "Noma'lum"))
     report_week_range = data.get('report_week_range', "Noma'lum")
     weekly_hours = data.get('weekly_hours', 0)
@@ -380,6 +431,7 @@ async def process_final(message: Message, state: FSMContext):
         f"📱 <b>Telefon:</b> {phone}\n"
         f"🗓 <b>Sana oralig'i:</b> {date_range}\n"
         f"👤 <b>O'qituvchi:</b> {fullname}\n"
+        f"🏫 <b>Sinf:</b> {class_name}\n"
         f"📚 <b>Fan:</b> {subject}\n"
         f"📅 <b>Tanlangan hafta:</b> {report_week_range}\n"
         f"⏰ <b>Haftalik umumiy soat:</b> {weekly_hours}\n\n"
