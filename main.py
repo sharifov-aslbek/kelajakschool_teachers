@@ -16,8 +16,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ================= KONFIGURATSIYA =================
-BOT_TOKEN = "8514239580:AAGD9c3Sls4WGwLmjf3xYhN8pXFTpifNuGU"
-ADMIN_GROUP_ID = -1003799360830
+BOT_TOKEN = "8254519971:AAFkLFk_G-nBmpKYzJo0q3pkWzJpsM1NCW8"
+ADMIN_GROUP_ID = -1002581311585
 TEACHER_PASSWORD = "12345"
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB limit
 
@@ -67,7 +67,7 @@ class TeacherReport(StatesGroup):
     choosing_start_date = State()
     choosing_end_date = State()
     waiting_for_fullname = State()
-    waiting_for_class_name = State()  # YANGA QO'SHILDI
+    waiting_for_class_name = State()
     waiting_for_subject = State()
 
     # --- YANI HOLATLAR (Interactive Plan o'rniga) ---
@@ -114,11 +114,12 @@ def get_last_week_range():
     return f"{last_monday.strftime('%d.%m.%Y')} - {last_sunday.strftime('%d.%m.%Y')}"
 
 def get_month_weeks_kb():
-    # UTC+5 (Asia/Tashkent) fallback if zoneinfo is not imported
+    # UTC+5 (Asia/Tashkent) vaqtini olish
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
     year = now.year
     month = now.month
+    current_day = now.day
 
     _, last_day = calendar.monthrange(year, month)
 
@@ -127,22 +128,32 @@ def get_month_weeks_kb():
     m_name = months_uz[month - 1]
 
     builder = InlineKeyboardBuilder()
+    weeks_map = {}
 
-    w1 = f"1-hafta: 01-{m_name}dan 07-{m_name}gacha"
-    w2 = f"2-hafta: 08-{m_name}dan 14-{m_name}gacha"
-    w3 = f"3-hafta: 15-{m_name}dan 21-{m_name}gacha"
-    w4 = f"4-hafta: 22-{m_name}dan {last_day}-{m_name}gacha"
+    weeks = [
+        (1, 1, 7),
+        (2, 8, 14),
+        (3, 15, 21),
+        (4, 22, last_day)
+    ]
 
-    builder.button(text=w1, callback_data="repweek:1")
-    builder.button(text=w2, callback_data="repweek:2")
-    builder.button(text=w3, callback_data="repweek:3")
-    builder.button(text=w4, callback_data="repweek:4")
+    for week_num, start_d, end_d in weeks:
+        # Faqatgina joriy va kelasi haftalarni ko'rsatish
+        if current_day <= end_d:
+            w_text = f"{week_num}-hafta: {start_d:02d}-{m_name}dan {end_d:02d}-{m_name}gacha"
+            cb_data = f"repweek:{week_num}"
+
+            builder.button(text=w_text, callback_data=cb_data)
+            weeks_map[cb_data] = w_text
 
     builder.adjust(1)
 
-    weeks_map = {
-        "repweek:1": w1, "repweek:2": w2, "repweek:3": w3, "repweek:4": w4
-    }
+    # Agar ro'yxat bo'sh qolib ketsa, xavfsizlik uchun oxirgi haftani chiqaramiz
+    if not weeks_map:
+        w_text = f"Oxirgi hafta: 22-{m_name}dan {last_day}-{m_name}gacha"
+        builder.button(text=w_text, callback_data="repweek:4")
+        weeks_map["repweek:4"] = w_text
+
     return builder.as_markup(), weeks_map
 
 async def show_day_selection(event, state: FSMContext):
