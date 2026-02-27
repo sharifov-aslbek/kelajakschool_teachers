@@ -67,8 +67,8 @@ class TeacherReport(StatesGroup):
     choosing_start_date = State()
     choosing_end_date = State()
     waiting_for_fullname = State()
-    waiting_for_class_name = State()
     waiting_for_subject = State()
+    waiting_for_class_name = State()  # Fan kiritilgandan so'ng so'raladi
 
     # --- YANI HOLATLAR (Interactive Plan o'rniga) ---
     choosing_report_week = State()
@@ -245,6 +245,14 @@ async def handle_calendar(callback: CallbackQuery, state: FSMContext):
 @router.message(TeacherReport.waiting_for_fullname)
 async def process_name(message: Message, state: FSMContext):
     await state.update_data(fullname=message.text)
+    # Ismdan keyin fanni so'raymiz
+    await state.set_state(TeacherReport.waiting_for_subject)
+    await message.answer("Qaysi fan bo'yicha dars berasiz?")
+
+@router.message(TeacherReport.waiting_for_subject)
+async def process_subject(message: Message, state: FSMContext):
+    await state.update_data(subject=message.text)
+    # Fandan keyin sinfni so'raymiz
     await state.set_state(TeacherReport.waiting_for_class_name)
 
     builder = InlineKeyboardBuilder()
@@ -262,16 +270,16 @@ async def process_name(message: Message, state: FSMContext):
 async def process_class_name(callback: CallbackQuery, state: FSMContext):
     class_name = callback.data.split(":", 1)[1]
     await state.update_data(class_name=class_name)
-    await state.set_state(TeacherReport.waiting_for_subject)
-    await callback.message.edit_text(f"✅ Sinf: {class_name}\n\nQaysi fan bo'yicha dars berasiz?")
 
-@router.message(TeacherReport.waiting_for_subject)
-async def process_subject(message: Message, state: FSMContext):
-    await state.update_data(subject=message.text)
+    # Sinfdan keyin haftani tanlashga o'tamiz
     await state.set_state(TeacherReport.choosing_report_week)
     kb, weeks_dict = get_month_weeks_kb()
     await state.update_data(weeks_dict=weeks_dict)
-    await message.answer("Oyning qaysi haftasi uchun hisobot kiritmoqchisiz?", reply_markup=kb)
+
+    await callback.message.edit_text(
+        f"✅ Sinf: {class_name}\n\nOyning qaysi haftasi uchun hisobot kiritmoqchisiz?",
+        reply_markup=kb
+    )
 
 @router.callback_query(TeacherReport.choosing_report_week, F.data.startswith("repweek:"))
 async def process_report_week(callback: CallbackQuery, state: FSMContext):
@@ -442,8 +450,8 @@ async def process_final(message: Message, state: FSMContext):
         f"📱 <b>Telefon:</b> {phone}\n"
         f"🗓 <b>Sana oralig'i:</b> {date_range}\n"
         f"👤 <b>O'qituvchi:</b> {fullname}\n"
-        f"🏫 <b>Sinf:</b> {class_name}\n"
         f"📚 <b>Fan:</b> {subject}\n"
+        f"🏫 <b>Sinf:</b> {class_name}\n"
         f"📅 <b>Tanlangan hafta:</b> {report_week_range}\n"
         f"⏰ <b>Haftalik umumiy soat:</b> {weekly_hours}\n\n"
         "📝 <b>Kunlik darslar:</b>\n"
