@@ -16,8 +16,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ================= KONFIGURATSIYA =================
-BOT_TOKEN = "8254519971:AAFkLFk_G-nBmpKYzJo0q3pkWzJpsM1NCW8"
-ADMIN_GROUP_ID = -1002581311585
+BOT_TOKEN = "8514239580:AAGD9c3Sls4WGwLmjf3xYhN8pXFTpifNuGU"
+ADMIN_GROUP_ID = -1003799360830
 TEACHER_PASSWORD = "12345"
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB limit
 
