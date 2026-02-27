@@ -64,11 +64,12 @@ dp.include_router(router)
 class TeacherReport(StatesGroup):
     waiting_for_contact = State()
     waiting_for_password = State()
+    choosing_month = State()          # YANGA QO'SHILDI
     choosing_start_date = State()
     choosing_end_date = State()
     waiting_for_fullname = State()
     waiting_for_subject = State()
-    waiting_for_class_name = State()  # Fan kiritilgandan so'ng so'raladi
+    waiting_for_class_name = State()
 
     # --- YANI HOLATLAR (Interactive Plan o'rniga) ---
     choosing_report_week = State()
@@ -89,19 +90,26 @@ def get_contact_kb():
         resize_keyboard=True, one_time_keyboard=True
     )
 
-def get_calendar_kb(prefix: str, month_offset=0):
+def get_months_kb():
     builder = InlineKeyboardBuilder()
-    now = datetime.now()
-    target_month = (now.month + month_offset - 1) % 12 + 1
-    target_year = now.year + (now.month + month_offset - 1) // 12
+    months_uz = [
+        "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
+        "Iyul", "Avgust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr"
+    ]
+    for i, m_name in enumerate(months_uz, start=1):
+        builder.button(text=m_name, callback_data=f"month:{i}")
+    builder.adjust(3)  # 3 ustun shaklida
+    return builder.as_markup()
 
-    for day in range(1, 32):
-        try:
-            date_str = f"{target_year}-{target_month:02d}-{day:02d}"
-            datetime.strptime(date_str, "%Y-%m-%d")
-            builder.button(text=str(day), callback_data=f"cal:{prefix}:{date_str}")
-        except ValueError:
-            continue
+def get_calendar_kb(prefix: str, target_year: int, target_month: int):
+    builder = InlineKeyboardBuilder()
+
+    # Tanlangan oyning necha kun ekanligini aniqlash
+    _, num_days = calendar.monthrange(target_year, target_month)
+
+    for day in range(1, num_days + 1):
+        date_str = f"{target_year}-{target_month:02d}-{day:02d}"
+        builder.button(text=str(day), callback_data=f"cal:{prefix}:{date_str}")
 
     builder.adjust(7)
     return builder.as_markup()
@@ -207,28 +215,71 @@ async def process_contact(message: Message, state: FSMContext):
 @router.message(TeacherReport.waiting_for_password)
 async def process_password(message: Message, state: FSMContext):
     if message.text == TEACHER_PASSWORD:
-        await state.set_state(TeacherReport.choosing_start_date)
-        await message.answer("✅ Parol to'g'ri. Hisobotning BOSHLANISH sanasini tanlang:", reply_markup=get_calendar_kb("start"))
+        await state.set_state(TeacherReport.choosing_month)
+        await message.answer(
+            "✅ Parol to'g'ri. Hisobotni qaysi oy uchun topshirmoqchisiz?",
+            reply_markup=get_months_kb()
+        )
     else:
         await message.answer("❌ Parol noto'g'ri. Iltimos, qaytadan urinib ko'ring:")
+
+@router.callback_query(TeacherReport.choosing_month, F.data.startswith("month:"))
+async def process_month_selection(callback: CallbackQuery, state: FSMContext):
+    selected_month = int(callback.data.split(":")[1])
+
+    # Joriy yil va oyni aniqlash
+    current_year = datetime.now().year
+    current_month = datetime.now().month
+
+    # Agar foydalanuvchi hozir (masalan) yanvarda bo'lib, dekabrni tanlasa o'tgan yilni oladi
+    target_year = current_year
+    if selected_month > current_month + 1:
+        target_year -= 1
+
+    await state.update_data(target_year=target_year, target_month=selected_month)
+    await state.set_state(TeacherReport.choosing_start_date)
+
+    months_uz = [
+        "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
+        "Iyul", "Avgust", "Sentyabr", "Oktyabr", "Noyabr", "Dekabr"
+    ]
+    m_name = months_uz[selected_month - 1]
+
+    await callback.message.edit_text(
+        f"✅ Tanlangan oy: <b>{m_name}</b>\n\nHisobotning BOSHLANISH sanasini tanlang:",
+        reply_markup=get_calendar_kb("start", target_year, selected_month),
+        parse_mode="HTML"
+    )
 
 @router.callback_query(F.data.startswith("cal:"))
 async def handle_calendar(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
     prefix, date_val = parts[1], parts[2]
 
+    data = await state.get_data()
+    target_year = data.get("target_year", datetime.now().year)
+    target_month = data.get("target_month", datetime.now().month)
+
     if prefix == "start":
         await state.update_data(start_date=date_val)
         await state.set_state(TeacherReport.choosing_end_date)
-        await callback.message.edit_text(f"Boshlanish sanasi: {date_val}\nEndi TUGASH sanasini tanlang:", reply_markup=get_calendar_kb("end"))
+        await callback.message.edit_text(
+            f"Boshlanish sanasi: {date_val}\nEndi TUGASH sanasini tanlang:",
+            reply_markup=get_calendar_kb("end", target_year, target_month)
+        )
     else:
-        data = await state.get_data()
         start_dt = datetime.strptime(data['start_date'], "%Y-%m-%d")
         end_dt = datetime.strptime(date_val, "%Y-%m-%d")
+
+        # Vaqtlar ketma-ketligini tekshirish
+        if end_dt < start_dt:
+            await callback.answer("⚠️ Tugash sanasi boshlanish sanasidan oldin bo'lishi mumkin emas!", show_alert=True)
+            return
+
         range_str = f"{start_dt.strftime('%d.%m.%Y')} - {end_dt.strftime('%d.%m.%Y')}"
         await state.update_data(date_range=range_str)
         await state.set_state(TeacherReport.waiting_for_fullname)
-        await callback.message.answer(f"📅 Sana oralig'i: {range_str}\n\nIsm va familiyangizni kiriting:")
+        await callback.message.edit_text(f"📅 Sana oralig'i: {range_str}\n\nIsm va familiyangizni kiriting:")
         await callback.answer()
 
 @router.message(TeacherReport.waiting_for_fullname)
@@ -370,7 +421,7 @@ async def handle_day_hours(hours: int, event, state: FSMContext):
     await state.update_data(lessons_data=lessons_data)
 
     await state.set_state(TeacherReport.waiting_for_lesson_topic)
-    msg_text = f"<b>{day}</b>. 1-dars mavzusi nima bo‘ldi?"
+    msg_text = f"<b>{day}</b>. 1-dars mavzusi nima bo‘ladi?"
 
     if isinstance(event, Message):
         await event.answer(msg_text, parse_mode="HTML")
@@ -403,7 +454,7 @@ async def process_lesson_homework(message: Message, state: FSMContext):
         c_num += 1
         await state.update_data(current_lesson_num=c_num)
         await state.set_state(TeacherReport.waiting_for_lesson_topic)
-        await message.answer(f"<b>{day}</b>. {c_num}-dars mavzusi nima bo‘ldi?", parse_mode="HTML")
+        await message.answer(f"<b>{day}</b>. {c_num}-dars mavzusi nima bo‘ladi?", parse_mode="HTML")
     else:
         await show_day_selection(message, state)
 
