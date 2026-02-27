@@ -117,43 +117,32 @@ def get_month_weeks_kb():
     # UTC+5 (Asia/Tashkent) vaqtini olish
     tz = timezone(timedelta(hours=5))
     now = datetime.now(tz)
-    year = now.year
-    month = now.month
-    current_day = now.day
-
-    _, last_day = calendar.monthrange(year, month)
 
     months_uz = ["yanvar", "fevral", "mart", "aprel", "may", "iyun",
                  "iyul", "avgust", "sentyabr", "oktyabr", "noyabr", "dekabr"]
-    m_name = months_uz[month - 1]
 
     builder = InlineKeyboardBuilder()
     weeks_map = {}
 
-    weeks = [
-        (1, 1, 7),
-        (2, 8, 14),
-        (3, 15, 21),
-        (4, 22, last_day)
-    ]
+    # Joriy haftaning dushanbasini aniqlaymiz
+    current_monday = now - timedelta(days=now.weekday())
 
-    for week_num, start_d, end_d in weeks:
-        # Faqatgina joriy va kelasi haftalarni ko'rsatish
-        if current_day <= end_d:
-            w_text = f"{week_num}-hafta: {start_d:02d}-{m_name}dan {end_d:02d}-{m_name}gacha"
-            cb_data = f"repweek:{week_num}"
+    # Ketma-ket keladigan 4 ta haftani shakllantiramiz
+    for i in range(4):
+        start_date = current_monday + timedelta(days=7 * i)
+        end_date = start_date + timedelta(days=6) # Yakshanba kuni
 
-            builder.button(text=w_text, callback_data=cb_data)
-            weeks_map[cb_data] = w_text
+        start_m_name = months_uz[start_date.month - 1]
+        end_m_name = months_uz[end_date.month - 1]
+
+        # Tugma ustidagi matn (masalan: 23-fevraldan 1-martgacha)
+        w_text = f"{i+1}-hafta: {start_date.day}-{start_m_name}dan {end_date.day}-{end_m_name}gacha"
+        cb_data = f"repweek:{i+1}"
+
+        builder.button(text=w_text, callback_data=cb_data)
+        weeks_map[cb_data] = w_text
 
     builder.adjust(1)
-
-    # Agar ro'yxat bo'sh qolib ketsa, xavfsizlik uchun oxirgi haftani chiqaramiz
-    if not weeks_map:
-        w_text = f"Oxirgi hafta: 22-{m_name}dan {last_day}-{m_name}gacha"
-        builder.button(text=w_text, callback_data="repweek:4")
-        weeks_map["repweek:4"] = w_text
-
     return builder.as_markup(), weeks_map
 
 async def show_day_selection(event, state: FSMContext):
