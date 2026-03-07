@@ -219,8 +219,12 @@ async def process_subject(message: Message, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     classes = [
-        "1- sinf", "2- sinf", "3- sinf", "4- sinf",
-        "Class of young talents", "Class of liders", "Class of winners"
+        "1- класс",
+        "Творцы будущего ",
+        "Kamalak",
+        "Class of young talents",
+        "Class of liders",
+        "Class of winners"
     ]
     for c_name in classes:
         builder.button(text=c_name, callback_data=f"class:{c_name}")
