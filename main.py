@@ -226,10 +226,8 @@ async def process_subject(message: Message, state: FSMContext):
         "3-4-o'zbek sinf",
         "5-o'zbek sinf",
         "6-o'zbek sinf",
-        "7-o'zbek sinf",
-        "8-o'zbek sinf",
-        "9-o'zbek sinf",
-        "10-11-o'zbek sinf"
+        "7-8-o'zbek sinf",
+        "9-10-11-o'zbek sinf"
     ]
     for c_name in classes:
         builder.button(text=c_name, callback_data=f"class:{c_name}")
